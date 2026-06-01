@@ -354,15 +354,17 @@ document.getElementById('inp-v').addEventListener('change',async function(){
   try{
     var XLSX=await loadXLSX();var buf=await file.arrayBuffer();var wb=XLSX.read(buf,{type:'array',cellDates:true});
     var added=0,newWks=[];
+    var existingDocs=new Set(SD.raw.map(function(r){return r.documento;}));
     wb.SheetNames.filter(function(s){return s!=='CUENTAS POR COBRAR';}).forEach(function(sname){
-      if(SD.weeks_order.includes(sname))return;
       var ws=wb.Sheets[sname];var raw=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,dateNF:'YYYY-MM-DD'});
       var hi=-1,hdrs=[];for(var i=0;i<raw.length;i++){var v=raw[i].map(function(x){return String(x||'').trim();});if(v.includes('Fecha')){hi=i;hdrs=v;break;}}
       if(hi<0)return;
       var ci={};hdrs.forEach(function(h,i){var l=h.toLowerCase();if(l==='fecha')ci.fecha=i;else if(l==='documento')ci.documento=i;else if(l==='cliente')ci.cliente=i;else if(l==='orden'||l.includes('orden'))ci.orden=i;else if(l.includes('cr')&&(l.includes('dito')||l.includes('edit')))ci.credito=i;else if(l.includes('posito')||l==='efectivo')ci.deposito=i;else if(l==='tc')ci.tc=i;else if(l.includes('transferencia'))ci.transferencia=i;else if(l.includes('link'))ci.link_pagos=i;else if(l.includes('contraentrega'))ci.contraentrega=i;else if(l.includes('paquetera'))ci.paquetera=i;else if(l.includes('monto a liquidar'))ci.monto_a_liquidar=i;else if(l==='liquidado')ci.liquidado=i;else if(l.includes('monto')&&l.includes('liquidado'))ci.monto_liquidado=i;});
       var recs=[];
       for(var i=hi+1;i<raw.length;i++){var row=raw[i];var fv=String(row[ci.fecha||0]||'');if(!fv||/total|proyecci/i.test(fv))continue;var fecha=null;var m1=fv.match(/^(\d{4})-(\d{2})-(\d{2})/);if(m1)fecha=m1[0];var m2=fv.match(/^(\d{2})\/(\d{2})\/(\d{4})/);if(m2)fecha=m2[3]+'-'+m2[2]+'-'+m2[1];if(!fecha)continue;var g=function(k,d){d=d||0;if(ci[k]===undefined)return d;var v=parseFloat(String(row[ci[k]]||'').replace(/[^0-9.\-]/g,''));return isNaN(v)?d:v;};var s=function(k,d){d=d||'';return String(row[ci[k]]||d).trim();};var rec={semana:sname,fecha:fecha,documento:s('documento'),orden:s('orden'),cliente:s('cliente'),credito:g('credito'),deposito:g('deposito'),tc:g('tc'),transferencia:g('transferencia'),link_pagos:g('link_pagos'),contraentrega:g('contraentrega'),paquetera:s('paquetera'),monto_a_liquidar:g('monto_a_liquidar'),liquidado:s('liquidado'),monto_liquidado:g('monto_liquidado')};rec.total=rec.credito+rec.deposito+rec.tc+rec.transferencia+rec.link_pagos+rec.contraentrega;if(rec.total===0&&rec.monto_liquidado===0)continue;recs.push(rec);added++;}
-      if(recs.length){SD.raw=SD.raw.concat(recs);newWks.push(sname);SD.weeks_order.push(sname);rebuildS();}
+      recs=recs.filter(function(rec){return rec.documento&&!existingDocs.has(rec.documento);});
+      recs.forEach(function(rec){existingDocs.add(rec.documento);});
+      if(recs.length){SD.raw=SD.raw.concat(recs);if(!newWks.includes(sname))newWks.push(sname);if(!SD.weeks_order.includes(sname))SD.weeks_order.push(sname);rebuildS();}
     });
     if(!added){$('status-v').textContent='Sin nuevas';return;}
     rebuildS();resumen();updMeta();$('status-v').textContent='+'+added;toast(added+' txns importadas'); if(typeof SB_USER!=='undefined'&&SB_USER){var allNewRecs=[];wb.SheetNames.filter(function(s){return s!=='CUENTAS POR COBRAR';}).forEach(function(sname){if(!newWks.includes(sname))return;SD.raw.filter(function(r){return r.semana===sname;}).forEach(function(r){allNewRecs.push(r);});});sbSaveVentas(allNewRecs);}
@@ -387,7 +389,7 @@ document.getElementById('inp-b').addEventListener('change',async function(){
       var wb2=XLSX.read(buf,{type:'array',cellDates:false});var ws2=wb2.Sheets[wb2.SheetNames[0]];
       var rws=XLSX.utils.sheet_to_json(ws2,{header:1,raw:false,defval:''});
       var hi=-1,ci2={};
-      for(var i=0;i<rws.length;i++){var r=rws[i].map(function(x){return String(x||'').toLowerCase().trim();});if(r.some(function(x){return x==='fecha';})&&r.some(function(x){return x.includes('deb')||x.includes('cred');})){hi=i;r.forEach(function(h,j){if(h==='fecha')ci2.f=j;else if(h.includes('descrip'))ci2.d=j;else if(h.includes('deb'))ci2.db=j;else if(h.includes('cred'))ci2.cr=j;else if(h.includes('saldo'))ci2.s=j;});break;}}
+      for(var i=0;i<rws.length;i++){var r=rws[i].map(function(x){return String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();});if(r.some(function(x){return x==='fecha';})&&r.some(function(x){return x.includes('deb')||x.includes('cred');})){hi=i;r.forEach(function(h,j){if(h==='fecha')ci2.f=j;else if(h.includes('descrip'))ci2.d=j;else if(h.includes('deb'))ci2.db=j;else if(h.includes('cred'))ci2.cr=j;else if(h.includes('saldo'))ci2.s=j;});break;}}
       if(hi<0){$('status-b').textContent='Sin encabezado';return;}
       for(var i=hi+1;i<rws.length;i++){var row2=rws[i];var rd2=String(row2[ci2.f]||'').trim();if(!rd2)continue;var fecha2=null;var m1=rd2.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);if(m1)fecha2=m1[3]+'-'+m1[2]+'-'+m1[1];var m2=rd2.match(/^(\d{4})-(\d{2})-(\d{2})/);if(m2)fecha2=rd2.slice(0,10);if(!fecha2)continue;var pf=function(v){return parseFloat(String(v||'').replace(/[^0-9.]/g,''))||0;};var deb2=pf(row2[ci2.db]),cred2=pf(row2[ci2.cr]),saldo2=pf(row2[ci2.s]);var desc2=String(row2[ci2.d]||'').trim();if(!desc2&&deb2===0&&cred2===0)continue;newT.push({fecha:fecha2,descripcion:desc2,debito:deb2,credito:cred2,saldo:saldo2,categoria:catB(desc2)});}
     }
